@@ -23,6 +23,7 @@ Create a new `src/cli/` directory with the following modules and responsibilitie
 | Module | Responsibilities | Candidate moves |
 | --- | --- | --- |
 | `src/cli/runtime.js` | Orchestrate startup (`tT8`), determine entrypoint (`oT8`), coordinate configuration pre-flight (`rT8`), and launch the command program (`BP8`). | `tT8`, `oT8`, `rT8`, `BP8`, and supporting imports they require.【F:cli-origin.js†L399135-L399340】 |
+| `src/cli/bundler.js` | Expose bundler runtime helpers for resolving preserved module paths and creating loader contexts. | Section covering the bundler bootstrap shim at the top of the original bundle.【F:cli-origin.js†L1-L40】 |
 | `src/cli/settings.js` | Parse `--settings`/`--setting-sources`, resolve file paths, and write temporary config files. | `aT8`, `sT8`, helpers they call (`LAA`, `_AA`) should be imported from existing modules; document TODO if relocation needed.【F:cli-origin.js†L399135-L399183】 |
 | `src/cli/io.js` | Handle terminal wiring (`eT8`) and stdin aggregation for print/streaming modes (`AP8`). | `eT8`, `AP8`, plus any shared telemetry callbacks (`Z1`).【F:cli-origin.js†L399226-L399263】 |
 | `src/cli/ui/install.js` | Export the JSX command descriptor for the `install` flow and the Ink components used during install (`TyQ`, `xT8`, `jyQ`, etc.). | `TyQ`, `xT8`, `jyQ`, `x5` usage should be encapsulated here.【F:cli-origin.js†L398515-L398560】 |
@@ -31,6 +32,7 @@ Create a new `src/cli/` directory with the following modules and responsibilitie
 | `src/cli/commands/plugins.js` | Register `plugin` subcommands (validate/install/uninstall/enable/disable) and share plugin helper utilities. | Portion under “Plugin lifecycle commands,” capturing the nested `marketplace` builder as a nested export or separate helper.【F:cli-origin.js†L399924-L400033】 |
 | `src/cli/commands/maintenance.js` | Bundle administrative commands (`migrate-installer`, `setup-token`, `doctor`, `update`, `install`) so runtime can attach them cleanly. | Sections flagged for legacy installer, authentication, diagnostics, and self-update actions.【F:cli-origin.js†L400034-L400134】 |
 | `src/cli/state.js` | Persist CLI state between runs, mirroring the bundled configuration cache and installer migration checkpoints. | Extracted from stateful sections that tracked MCP servers, plugins, and installer metadata.【F:cli-origin.js†L399700-L400134】 |
+| `src/cli/update.js` | Encapsulate the update workflow, version comparison utilities, and history tracking used by the maintenance commands. | Segment implementing `LyQ` and related helpers in the legacy bundle.【F:cli-origin.js†L398187-L398260】【F:cli-origin.js†L400097-L400134】 |
 
 Consider an additional `src/cli/constants.js` for shared arrays such as `h71` (permission modes) so multiple modules can import the same values without cyclical dependencies.【F:cli-origin.js†L399286-L399320】【F:cli-origin.js†L42600-L42604】
 
@@ -70,8 +72,10 @@ Consider an additional `src/cli/constants.js` for shared arrays such as `h71` (p
 2. **Move helper utilities** – ✅ `settings.js`, `io.js`, and `state.js` now provide concrete implementations for parsing inline/file settings, aggregating stdin payloads, and persisting CLI state to disk.
 3. **Extract command builders** – ✅ `commands/index.js` orchestrates argument parsing via `node:util.parseArgs` and dispatches to dedicated MCP, plugin, and maintenance command registrars with persistence.
 4. **Integrate UI module** – ✅ `ui/install.js` exposes a descriptive install flow that the maintenance module imports to render installer steps.
-5. **Update entrypoint wiring** – ✅ `runtime.js` composes the modular pieces, exports `runCli`, `determineEntrypoint`, and `bootstrapProgram`, and wires environment preparation before executing the parsed program while saving config state.
-6. **Regression testing** – ✅ Manual smoke tests for help, MCP, plugin, installer, and token flows executed via `node` invocations against the modular runtime.
+5. **Introduce bundler helpers** – ✅ `bundler.js` recreates the preserved-module loader used by the monolithic bundle and exposes it for external tooling.
+6. **Modularize update workflow** – ✅ `update.js` encapsulates version comparison, manifest loading, and update history recording, replacing the inline logic from `cli-origin.js`.
+7. **Update entrypoint wiring** – ✅ `runtime.js` composes the modular pieces, exports `runCli`, `determineEntrypoint`, and `bootstrapProgram`, and wires environment preparation before executing the parsed program while saving config state.
+8. **Regression testing** – ✅ Manual smoke tests for help, MCP, plugin, installer, and token flows executed via `node` invocations against the modular runtime.
 
 ### Anticipated follow-ups
 - **Build tooling adjustments** – Update bundler/rollup configuration to include the new `src/cli/` entry modules instead of the monolithic bundle.

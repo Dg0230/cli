@@ -2,6 +2,15 @@ import { parseArgs } from "node:util";
 
 import { DEFAULT_INSTALL_STEPS } from "../constants.js";
 import { markDirty } from "../state.js";
+import {
+  applyUpdatePlan,
+  createUpdateLogger,
+  determineUpdatePlan,
+  formatUpdateSummary,
+  loadUpdateManifest,
+  recordUpdateResult,
+  summarizeUpdateHistory,
+} from "../update.js";
 
 function ensureState(state) {
   if (!state.tokens || typeof state.tokens !== "object") {
@@ -9,6 +18,12 @@ function ensureState(state) {
   }
   if (!Array.isArray(state.updateHistory)) {
     state.updateHistory = [];
+  }
+  if (typeof state.updateChannel !== "string") {
+    state.updateChannel = "stable";
+  }
+  if (!("lastUpdateCheck" in state)) {
+    state.lastUpdateCheck = null;
   }
   return state;
 }
@@ -39,12 +54,6 @@ function runDoctor(state) {
   return results;
 }
 
-function recordUpdate(state, info) {
-  ensureState(state);
-  state.updateHistory.push(info);
-  markDirty(state);
-}
-
 export function registerMaintenanceCommands(
   register,
   { state = {}, ui = {}, version = "0.0.0" } = {}
@@ -69,33 +78,97 @@ export function registerMaintenanceCommands(
           `${failures.length} issue(s) detected. Consult the upgrade guide.\n`
         );
       }
+      const historySummary = summarizeUpdateHistory(state);
+      if (historySummary) {
+        stdio.stdout.write(`\n${historySummary}\n`);
+      }
     },
   });
 
   register({
     name: "update",
     description: "Check for CLI updates",
-    async run({ context }) {
+    async run({ context, rawArgs }) {
       ensureState(state);
       const stdio = {
         stdout: context.stdout ?? process.stdout,
+        stderr: context.stderr ?? process.stderr,
       };
-      const timestamp = new Date().toISOString();
-      const latest = process.env.CLAUDE_CODE_LATEST ?? version;
-      const current = version ?? "0.0.0";
-      if (latest === current) {
-        stdio.stdout.write(`You are running the latest version (${current}).\n`);
-      } else {
-        stdio.stdout.write(
-          `Update available: current ${current}, latest ${latest}.\n`
-        );
-      }
-      recordUpdate(state, {
-        timestamp,
-        latest,
-        current,
-        status: latest === current ? "up-to-date" : "update-available",
+      const args = parseArgs({
+        args: rawArgs ?? [],
+        allowPositionals: true,
+        strict: false,
+        options: {
+          channel: { type: "string" },
+          manifest: { type: "string" },
+          "dry-run": { type: "boolean" },
+        },
       });
+      const channel = args.values.channel ?? state.updateChannel ?? "stable";
+      const manifestPath =
+        args.values.manifest ??
+        process.env.CLAUDE_CODE_UPDATE_MANIFEST ??
+        state.updateManifestPath ??
+        null;
+      let manifest;
+      try {
+        manifest = await loadUpdateManifest({
+          manifestPath,
+          defaultManifest: state.updateManifest,
+          cwd: context.cwd ?? process.cwd(),
+        });
+      } catch (error) {
+        stdio.stderr.write(`${error.message}\n`);
+        recordUpdateResult(state, {
+          plan: {
+            status: "manifest-error",
+            targetVersion: null,
+            channel,
+          },
+          applied: false,
+          skipped: true,
+          completedAt: new Date().toISOString(),
+        });
+        return;
+      }
+      const plan = determineUpdatePlan({
+        currentVersion: version ?? "0.0.0",
+        manifest,
+        channel,
+      });
+      stdio.stdout.write(`${formatUpdateSummary(plan)}\n`);
+      state.updateChannel = channel;
+      const dryRun = args.values["dry-run"] === true;
+      let result;
+      if (dryRun || plan.status !== "update-available") {
+        const timestamp = new Date().toISOString();
+        result = {
+          plan,
+          applied: false,
+          skipped: true,
+          completedAt: timestamp,
+        };
+        if (dryRun && plan.status === "update-available") {
+          stdio.stdout.write("Dry run: update not applied.\n");
+        }
+      } else {
+        const logger = createUpdateLogger({ stdout: stdio.stdout });
+        result = await applyUpdatePlan(plan, {
+          logger,
+          download: async (context) => ({
+            artifact: context.release?.url ?? null,
+            checksum: context.release?.checksum ?? null,
+          }),
+          install: async () => ({
+            restarted: false,
+          }),
+        });
+      }
+      recordUpdateResult(state, result);
+      const historySummary = summarizeUpdateHistory(state);
+      if (historySummary) {
+        stdio.stdout.write(`\n${historySummary}\n`);
+      }
     },
   });
 

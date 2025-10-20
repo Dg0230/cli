@@ -108,6 +108,37 @@ export function registerPluginCommands(register, { state = {} } = {}) {
           }
           return;
         }
+        case "validate": {
+          const [name] = rest;
+          if (!name) {
+            stdio.stderr.write("Usage: claude plugin validate <name>\n");
+            return;
+          }
+          const plugin = state.plugins[name];
+          if (!plugin) {
+            stdio.stderr.write(`No plugin named '${name}'.\n`);
+            return;
+          }
+          const issues = [];
+          if (!plugin.version) {
+            issues.push("Missing version field.");
+          }
+          if (plugin.source && !plugin.source.startsWith("http")) {
+            issues.push("Source should be a URL when provided.");
+          }
+          if (plugin.enabled === false && !plugin.disabledAt) {
+            issues.push("Disabled plugins should include a disabledAt timestamp.");
+          }
+          if (issues.length === 0) {
+            stdio.stdout.write(`Plugin '${name}' looks healthy.\n`);
+          } else {
+            stdio.stderr.write(`Plugin '${name}' has issues:\n`);
+            for (const issue of issues) {
+              stdio.stderr.write(`- ${issue}\n`);
+            }
+          }
+          return;
+        }
         case "install": {
           const { values, positionals: args } = parseArgs({
             args: rest,
@@ -130,6 +161,7 @@ export function registerPluginCommands(register, { state = {} } = {}) {
             enabled: true,
             source: values.source ?? null,
             installedAt: new Date().toISOString(),
+            disabledAt: null,
           };
           markDirty(state);
           stdio.stdout.write(`Installed plugin '${name}'.\n`);
@@ -164,6 +196,11 @@ export function registerPluginCommands(register, { state = {} } = {}) {
           }
           plugin.enabled = subcommand === "enable";
           plugin.modifiedAt = new Date().toISOString();
+          if (subcommand === "disable") {
+            plugin.disabledAt = new Date().toISOString();
+          } else {
+            delete plugin.disabledAt;
+          }
           markDirty(state);
           stdio.stdout.write(
             `${subcommand === "enable" ? "Enabled" : "Disabled"} plugin '${name}'.\n`

@@ -22,6 +22,8 @@ export const DEFAULT_STATE = Object.freeze({
   tokens: {},
   updateHistory: [],
   installMigration: null,
+  updateChannel: "stable",
+  lastUpdateCheck: null,
 });
 
 function ensureDirectoryExists(filePath) {

@@ -1,3 +1,5 @@
+import http from "node:http";
+
 import { markDirty } from "../state.js";
 
 function ensureState(state) {
@@ -103,6 +105,64 @@ export function registerMcpCommands(register, { state = {} } = {}) {
           };
           markDirty(state);
           stdio.stdout.write(`Added MCP server '${name}'.\n`);
+          return;
+        }
+        case "serve": {
+          const [name, ...flagSegments] = rest;
+          if (!name) {
+            stdio.stderr.write("Usage: claude mcp serve <name> [--port <number>] [--host <hostname>] [--live]\n");
+            return;
+          }
+          const flags = normalizeFlags(flagSegments);
+          const port = Number.parseInt(flags.port ?? "5173", 10);
+          const host = flags.host ?? "127.0.0.1";
+          const live = flags.live === true || flags.live === "true";
+          if (!Number.isFinite(port) || port <= 0) {
+            stdio.stderr.write("Port must be a positive integer.\n");
+            return;
+          }
+          const info = state.mcpServers[name] ?? {
+            url: flags.url ?? `http://${host}:${port}`,
+            description: "", 
+            permission: "default",
+          };
+          state.mcpServers[name] = info;
+          info.lastServedAt = new Date().toISOString();
+          markDirty(state);
+          if (!live) {
+            stdio.stdout.write(
+              `Dry run: would serve '${name}' at http://${host}:${port}. Pass --live to start the built-in development server.\n`
+            );
+            return;
+          }
+          await new Promise((resolve, reject) => {
+            const server = http.createServer((request, response) => {
+              response.writeHead(200, { "Content-Type": "application/json" });
+              response.end(
+                JSON.stringify({
+                  name,
+                  message: "Claude MCP development server",
+                  timestamp: new Date().toISOString(),
+                })
+              );
+            });
+            const cleanup = () => {
+              server.close(() => resolve());
+            };
+            server.on("error", (error) => {
+              stdio.stderr.write(`Server error: ${error.message}\n`);
+              reject(error);
+            });
+            server.listen(port, host, () => {
+              stdio.stdout.write(
+                `Serving '${name}' at http://${host}:${port}\nPress Ctrl+C to stop the server.\n`
+              );
+            });
+            process.once("SIGINT", cleanup);
+            process.once("SIGTERM", cleanup);
+          }).catch(() => {
+            // errors already logged; the promise rejection prevents unhandled rejections.
+          });
           return;
         }
         case "remove": {
